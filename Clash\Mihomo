@@ -1,0 +1,494 @@
+// Clash/Mihomo common overwrite script, optimized version
+const OPTIONS = {
+    enableTun: true,
+    enableSniffer: true,
+    // Set true when leak prevention is more important than compatibility with game boosters/VPNs.
+    strictRoute: false,
+    testUrl: "https://cp.cloudflare.com/generate_204",
+    // 改为 DIRECT 避免冷启动时规则集下载失败
+    ruleProviderProxy: "DIRECT",
+};
+
+function main(params) {
+    if (!params || !Array.isArray(params.proxies)) return params;
+
+    const globalExcludeKeywords = /(邀请返佣|重新从网站获取订阅|公告信息|重置|套餐|剩余|网址|https?:\/\/|\.[a-z]{2,})/i;
+    params.proxies = params.proxies.filter((proxy) => proxy && proxy.name && !globalExcludeKeywords.test(proxy.name));
+
+    overwriteBasicOptions(params);
+    overwriteDns(params);
+    overwriteHosts(params);
+    overwriteTunnel(params);
+    overwriteProxyGroups(params);
+    overwriteRules(params);
+    return params;
+}
+
+function overwriteBasicOptions(params) {
+    Object.assign(params, {
+        "mixed-port": 7897,
+        "allow-lan": true,
+        mode: "rule",
+        "log-level": "warning",
+        ipv6: false,
+        "find-process-mode": "off",
+        profile: {
+            "store-selected": true,
+            "store-fake-ip": true,
+        },
+        "unified-delay": true,
+        "tcp-concurrent": true,
+        "global-client-fingerprint": "chrome",
+    });
+
+    if (OPTIONS.enableSniffer) {
+        params.sniffer = {
+            enable: true,
+            sniff: {
+                HTTP: {
+                    ports: [80, "8080-8880"],
+                    "override-destination": true,
+                },
+                TLS: {
+                    ports: [443, 8443],
+                    "override-destination": true,
+                },
+                QUIC: {
+                    ports: [443, 8443],
+                },
+            },
+            "skip-domain": [
+                "+.lan",
+                "+.local",
+                "+.localdomain",
+                "+.home.arpa",
+                "+.mesh.mihome.io",
+                "+.push.apple.com",
+                "+.push.googleapis.com",
+                "+.mtalk.google.com",
+            ],
+        };
+    } else {
+        delete params.sniffer;
+    }
+}
+
+function overwriteDns(params) {
+    params.dns = {
+        enable: true,
+        "prefer-h3": false,
+        ipv6: false,
+        "enhanced-mode": "fake-ip",
+        "fake-ip-range": "198.18.0.1/16",
+        "default-nameserver": ["223.5.5.5", "119.29.29.29"],
+        nameserver: [
+            "https://223.5.5.5/dns-query",
+            "https://doh.pub/dns-query",
+        ],
+        fallback: [
+            "https://1.1.1.1/dns-query",
+            "https://dns.google/dns-query",
+        ],
+        "fallback-filter": {
+            geoip: true,
+            "geoip-code": "CN",
+            ipcidr: ["240.0.0.0/4"],
+        },
+        // 修复:代理节点的 DNS 解析改用国外 DNS,避免泄露
+        "proxy-server-nameserver": ["1.1.1.1", "8.8.8.8"],
+        "fake-ip-filter": [
+            "*.lan",
+            "*.local",
+            "*.localdomain",
+            "*.internal",
+            "*.home",
+            "*.home.arpa",
+            "*.m2m",
+            "*.bogon",
+            "*.router",
+            "*.direct",
+            "*.plex.direct",
+            "*.sslip.io",
+            "*.nip.io",
+            "dns.msftncsi.com",
+            "localhost.ptlogin2.qq.com",
+            "+.injections.adguard.org",
+            "+.local.adguard.org",
+            "+.mesh.mihome.io",
+            "+.push.apple.com",
+            "+.push.googleapis.com",
+            "+.mtalk.google.com",
+            "stun.*",
+            "*.stun.*.*",
+            "*.stun.playstation.net",
+            "*.stun.twilio.com",
+            "stun.syncthing.net",
+            "xbox.*.microsoft.com",
+            "*.xboxlive.com",
+            "*.turn.twilio.com",
+        ],
+        "nameserver-policy": buildNameserverPolicy(),
+    };
+}
+
+function buildNameserverPolicy() {
+    const systemDomains = [
+        "captive.apple.com",
+        "hotspot.cslwifi.com",
+        "*.m2m",
+        "*.bogon",
+        "*.lan",
+        "*.local",
+        "*.internal",
+        "*.localdomain",
+        "*.home",
+        "*.home.arpa",
+        "*.router",
+        "*.plex.direct",
+        "*.ui.direct",
+        "+.10.in-addr.arpa",
+        "+.16.172.in-addr.arpa",
+        "+.17.172.in-addr.arpa",
+        "+.18.172.in-addr.arpa",
+        "+.19.172.in-addr.arpa",
+        "+.20.172.in-addr.arpa",
+        "+.21.172.in-addr.arpa",
+        "+.22.172.in-addr.arpa",
+        "+.23.172.in-addr.arpa",
+        "+.24.172.in-addr.arpa",
+        "+.25.172.in-addr.arpa",
+        "+.26.172.in-addr.arpa",
+        "+.27.172.in-addr.arpa",
+        "+.28.172.in-addr.arpa",
+        "+.29.172.in-addr.arpa",
+        "+.30.172.in-addr.arpa",
+        "+.31.172.in-addr.arpa",
+        "+.168.192.in-addr.arpa",
+        "+.254.169.in-addr.arpa",
+    ];
+    const alidnsDomains = [
+        "dns.alidns.com",
+        "+.alibaba.com",
+        "+.aliyun.com",
+        "+.alicdn.com",
+        "+.alipay.com",
+        "+.taobao.com",
+        "+.tmall.com",
+        "+.amap.com",
+        "+.dingtalk.com",
+    ];
+    const dnspodDomains = [
+        "doh.pub",
+        "+.qq.com",
+        "+.qcloud.com",
+        "+.tencent.com",
+        "+.weixin.com",
+        "+.weiyun.com",
+        "+.bilibili.com",
+        "+.xiaomi.com",
+    ];
+    const byteDomains = [
+        "+.bytedance.com",
+        "+.douyin.com",
+        "+.toutiao.com",
+        "+.snssdk.com",
+        "+.feishu.cn",
+        "+.feishu.net",
+    ];
+    const baiduDomains = [
+        "+.baidu.com",
+        "+.baidu.cn",
+        "+.iqiyi.com",
+        "+.hao123.com",
+    ];
+    const policy = {};
+
+    for (const domain of systemDomains) policy[domain] = "system";
+    for (const domain of alidnsDomains) policy[domain] = "https://223.5.5.5/dns-query";
+    for (const domain of dnspodDomains) policy[domain] = "https://doh.pub/dns-query";
+    for (const domain of byteDomains) policy[domain] = "180.184.2.2";
+    for (const domain of baiduDomains) policy[domain] = "180.76.76.76";
+    policy["doh.360.cn"] = "101.198.198.198";
+
+    return policy;
+}
+
+function overwriteHosts(params) {
+    params.hosts = {
+        "dns.alidns.com": ["223.5.5.5", "223.6.6.6", "2400:3200:baba::1", "2400:3200::1"],
+        "doh.pub": ["120.53.53.53", "1.12.12.12"],
+        // 移除 jsdelivr 劫持,现在不太稳定
+    };
+}
+
+function overwriteTunnel(params) {
+    params.tun = {
+        enable: OPTIONS.enableTun,
+        stack: "mixed",
+        device: "TUN",
+        "dns-hijack": ["any:53", "tcp://any:53"],
+        "auto-route": true,
+        "auto-detect-interface": true,
+        "strict-route": OPTIONS.strictRoute,
+        "route-exclude-address": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"],
+    };
+}
+
+function overwriteProxyGroups(params) {
+    const allProxies = params.proxies.map((proxy) => proxy.name);
+    // P0 改进:增加 DIRECT 兜底,确保即使所有代理挂了也能直连
+    const fallbackProxies = allProxies.length > 0 ? [...allProxies, "DIRECT"] : ["DIRECT"];
+    const excludeTerms = "(剩余|到期|主页|官网|关注|网站|地址|有效|网址|禁止|邮箱|发布|客服|订阅|节点|问题|联系)";
+    const includeTerms = {
+        HK: "(港|HK|Hong|🇭🇰)",
+        TW: "(台|TW|Taiwan|Wan|🇹🇼)",
+        SG: "(新加坡|狮城|SG|Singapore|🇸🇬)",
+        JP: "(日本|川日|东京|大阪|泉日|埼玉|沪日|深日|JP|Japan|🇯🇵)",
+        KR: "(韩国|韩|KR|Korea|🇰🇷)",
+        US: "(美|波特兰|达拉斯|俄勒冈|凤凰城|费利蒙|硅谷|拉斯维加斯|洛杉矶|圣何塞|圣克拉拉|西雅图|芝加哥|US|United States|America|🇺🇸)",
+        UK: "(英|伦敦|UK|United Kingdom|🇬🇧)",
+        FR: "(法|巴黎|FR|France|🇫🇷)",
+        DE: "(德|法兰克福|DE|Germany|🇩🇪)",
+    };
+    const allCountryTerms = Object.values(includeTerms).join("|");
+    const autoProxyGroupRegexs = [
+        { name: "HK-自动", regex: new RegExp(`^(?=.*${includeTerms.HK})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "TW-自动", regex: new RegExp(`^(?=.*${includeTerms.TW})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "SG-自动", regex: new RegExp(`^(?=.*${includeTerms.SG})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "JP-自动", regex: new RegExp(`^(?=.*${includeTerms.JP})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "KR-自动", regex: new RegExp(`^(?=.*${includeTerms.KR})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "US-自动", regex: new RegExp(`^(?=.*${includeTerms.US})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "UK-自动", regex: new RegExp(`^(?=.*${includeTerms.UK})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "FR-自动", regex: new RegExp(`^(?=.*${includeTerms.FR})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "DE-自动", regex: new RegExp(`^(?=.*${includeTerms.DE})(?!.*${excludeTerms}).*$`, "i") },
+        { name: "0.x-自动", regex: new RegExp(`^(?=.*(?:^|[^0-9])0\\.[1-9](?:$|[^0-9]))(?!.*${excludeTerms}).*$`, "i") },
+    ];
+    const autoProxyGroups = autoProxyGroupRegexs
+        .map((item) => ({
+            name: item.name,
+            type: "url-test",
+            url: OPTIONS.testUrl,
+            interval: 600,
+            tolerance: 50,
+            proxies: getProxiesByRegex(params, item.regex),
+            hidden: true,
+        }))
+        .filter((group) => group.proxies.length > 0);
+    const autoGroupNames = autoProxyGroups.map((group) => group.name);
+    const autoSelectorProxies = ["All-自动", ...autoGroupNames];
+    const serviceProxies = ["Proxy", "Select", "DIRECT", ...autoGroupNames];
+    const manualGroups = [
+        {
+            name: "Other",
+            regex: new RegExp(`^(?!.*(?:${allCountryTerms}|${excludeTerms})).*$`, "i"),
+            icon: "https://cdn.jsdelivr.net/gh/Alex-repositories/icons_01@main/Other.png",
+        },
+    ];
+    const manualProxyGroups = manualGroups
+        .map((item) => ({
+            name: item.name,
+            type: "select",
+            proxies: getProxiesByRegex(params, item.regex),
+            icon: item.icon,
+            hidden: false,
+        }))
+        .filter((group) => group.proxies.length > 0);
+    const manualGroupNames = manualProxyGroups.map((group) => group.name);
+    const mainProxyProxies = ["Auto", "Select", "Balance", ...manualGroupNames, "DIRECT"];
+
+    const groups = [
+        {
+            name: "Proxy",
+            type: "select",
+            icon: "https://cdn.jsdelivr.net/gh/Alex-repositories/icons_01@main/Proxy.png",
+            proxies: mainProxyProxies,
+        },
+        {
+            name: "Auto",
+            type: "select",
+            icon: "https://cdn.jsdelivr.net/gh/Alex-repositories/icons_01@main/Auto.png",
+            proxies: autoSelectorProxies,
+        },
+        {
+            name: "Select",
+            type: "select",
+            icon: "https://cdn.jsdelivr.net/gh/Alex-repositories/icons_01@main/Select.png",
+            proxies: fallbackProxies,
+        },
+        {
+            name: "Balance",
+            type: "load-balance",
+            url: OPTIONS.testUrl,
+            // 统一检测间隔为 600 秒
+            interval: 600,
+            lazy: true,
+            strategy: "consistent-hashing",
+            proxies: fallbackProxies,
+            icon: "https://cdn.jsdelivr.net/gh/Alex-repositories/icons_01@main/Nodes.png",
+        },
+        {
+            name: "All-自动",
+            type: "url-test",
+            url: OPTIONS.testUrl,
+            interval: 600,
+            tolerance: 50,
+            proxies: fallbackProxies,
+            hidden: true,
+        },
+        serviceGroup("AIGC", serviceProxies, "AI.png"),
+        serviceGroup("Apple", serviceProxies, "Apple.png"),
+        serviceGroup("Google", serviceProxies, "Google.png"),
+        serviceGroup("Instagram", serviceProxies, "Instagram.png"),
+        serviceGroup("Microsoft", serviceProxies, "Microsoft.png"),
+        serviceGroup("Netflix", serviceProxies, "Netflix.png"),
+        serviceGroup("Telegram", serviceProxies, "Telegram.png"),
+        serviceGroup("TikTok", serviceProxies, "Tiktok.png"),
+        serviceGroup("YouTube", serviceProxies, "Youtube.png"),
+        serviceGroup("X", serviceProxies, "Twitter.png"),
+        // P0 改进:增加游戏分组
+        serviceGroup("Game", serviceProxies, "Game.png"),
+        ...autoProxyGroups,
+        ...manualProxyGroups,
+    ];
+
+    params["proxy-groups"] = groups;
+}
+
+function serviceGroup(name, proxies, iconName) {
+    return {
+        name,
+        type: "select",
+        proxies,
+        icon: `https://cdn.jsdelivr.net/gh/Alex-repositories/icons_01@main/${iconName}`,
+    };
+}
+
+function overwriteRules(params) {
+    // 微信规则提到最前面,确保最高优先级
+    const wechatRules = [
+        "DOMAIN-SUFFIX,weixin.qq.com,DIRECT",
+        "DOMAIN-SUFFIX,wechat.com,DIRECT",
+        "DOMAIN-KEYWORD,weixin,DIRECT",
+    ];
+    const adNonipRules = [
+        "RULE-SET,reject_non_ip,REJECT",
+        "RULE-SET,reject_domainset,REJECT",
+        "RULE-SET,reject_non_ip_drop,REJECT-DROP",
+        "RULE-SET,reject_non_ip_no_drop,REJECT",
+    ];
+    const dohDotRules = [
+        "DOMAIN,dns.google,Proxy",
+        "DOMAIN,dns64.dns.google,Proxy",
+        "DOMAIN,dns.quad9.net,Proxy",
+        "DOMAIN,doh.opendns.com,Proxy",
+        "DOMAIN,doh.familyshield.opendns.com,Proxy",
+        "DOMAIN,doh.cleanbrowsing.org,Proxy",
+        "DOMAIN,mozilla.cloudflare-dns.com,Proxy",
+        "DOMAIN-SUFFIX,cloudflare-dns.com,Proxy",
+        "DOMAIN-SUFFIX,dns.nextdns.io,Proxy",
+        "DOMAIN-SUFFIX,dns.adguard.com,Proxy",
+        "DOMAIN-SUFFIX,dns.sb,Proxy",
+        "DOMAIN-SUFFIX,doh.pub,DIRECT",
+        "DOMAIN-SUFFIX,dns.alidns.com,DIRECT",
+    ];
+    const serviceRuleSets = [
+        "RULE-SET,youtube,YouTube",
+        "RULE-SET,google,Google",
+        "RULE-SET,netflix,Netflix",
+        "RULE-SET,tiktok,TikTok",
+        "RULE-SET,meta,Instagram",
+        // P0 改进:增加游戏规则集
+        "RULE-SET,game,Game",
+    ];
+    const nonipRules = [
+        "RULE-SET,cdn_domainset,Proxy",
+        "RULE-SET,cdn_non_ip,Proxy",
+        "RULE-SET,stream_non_ip,Proxy",
+        "RULE-SET,telegram_non_ip,Telegram",
+        "RULE-SET,apple_cdn,DIRECT",
+        "RULE-SET,download_domainset,Proxy",
+        "RULE-SET,download_non_ip,Proxy",
+        "RULE-SET,microsoft_cdn_non_ip,DIRECT",
+        "RULE-SET,apple_cn_non_ip,DIRECT",
+        "RULE-SET,apple_services,Apple",
+        "RULE-SET,microsoft_non_ip,Microsoft",
+        "RULE-SET,ai_non_ip,AIGC",
+        "RULE-SET,global_non_ip,Proxy",
+        "RULE-SET,domestic_non_ip,DIRECT",
+        "RULE-SET,direct_non_ip,DIRECT",
+        "RULE-SET,lan_non_ip,DIRECT",
+    ];
+    const ipRules = [
+        "RULE-SET,reject_ip,REJECT",
+        "RULE-SET,telegram_ip,Telegram",
+        "RULE-SET,stream_ip,Proxy",
+        "RULE-SET,lan_ip,DIRECT",
+        "RULE-SET,domestic_ip,DIRECT",
+        "RULE-SET,china_ip,DIRECT",
+        "MATCH,Proxy",
+    ];
+
+    params.rules = [
+        ...wechatRules,
+        ...dohDotRules,
+        ...adNonipRules,
+        ...serviceRuleSets,
+        ...nonipRules,
+        ...ipRules,
+    ];
+    params["rule-providers"] = buildRuleProviders();
+}
+
+function buildRuleProviders() {
+    const rp = (behavior, url, path, format = "text") => ({
+        type: "http",
+        behavior,
+        url,
+        path,
+        interval: 43200,
+        format,
+        proxy: OPTIONS.ruleProviderProxy,
+    });
+
+    return {
+        reject_non_ip_no_drop: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/reject-no-drop.txt", "./rule_set/sukkaw_ruleset/reject_non_ip_no_drop.txt"),
+        reject_non_ip_drop: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/reject-drop.txt", "./rule_set/sukkaw_ruleset/reject_non_ip_drop.txt"),
+        reject_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/reject.txt", "./rule_set/sukkaw_ruleset/reject_non_ip.txt"),
+        reject_domainset: rp("domain", "https://ruleset.skk.moe/Clash/domainset/reject.txt", "./rule_set/sukkaw_ruleset/reject_domainset.txt"),
+        reject_ip: rp("classical", "https://ruleset.skk.moe/Clash/ip/reject.txt", "./rule_set/sukkaw_ruleset/reject_ip.txt"),
+        cdn_domainset: rp("domain", "https://ruleset.skk.moe/Clash/domainset/cdn.txt", "./rule_set/sukkaw_ruleset/cdn_domainset.txt"),
+        cdn_non_ip: rp("domain", "https://ruleset.skk.moe/Clash/non_ip/cdn.txt", "./rule_set/sukkaw_ruleset/cdn_non_ip.txt"),
+        stream_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/stream.txt", "./rule_set/sukkaw_ruleset/stream_non_ip.txt"),
+        stream_ip: rp("classical", "https://ruleset.skk.moe/Clash/ip/stream.txt", "./rule_set/sukkaw_ruleset/stream_ip.txt"),
+        ai_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/ai.txt", "./rule_set/sukkaw_ruleset/ai_non_ip.txt"),
+        telegram_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/telegram.txt", "./rule_set/sukkaw_ruleset/telegram_non_ip.txt"),
+        telegram_ip: rp("classical", "https://ruleset.skk.moe/Clash/ip/telegram.txt", "./rule_set/sukkaw_ruleset/telegram_ip.txt"),
+        // P0 改进:增加游戏规则集提供商
+        game: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/game.txt", "./rule_set/sukkaw_ruleset/game.txt"),
+        youtube: rp("classical", "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/YouTube/YouTube.yaml", "./rule_set/youtube.yaml", "yaml"),
+        google: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/google.txt", "./rule_set/google.txt"),
+        netflix: rp("classical", "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Netflix/Netflix.yaml", "./rule_set/netflix.yaml", "yaml"),
+        tiktok: rp("classical", "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/TikTok/TikTok.yaml", "./rule_set/tiktok.yaml", "yaml"),
+        meta: rp("classical", "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Facebook/Facebook.yaml", "./rule_set/meta.yaml", "yaml"),
+        apple_cdn: rp("domain", "https://ruleset.skk.moe/Clash/domainset/apple_cdn.txt", "./rule_set/sukkaw_ruleset/apple_cdn.txt"),
+        apple_services: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/apple_services.txt", "./rule_set/sukkaw_ruleset/apple_services.txt"),
+        apple_cn_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/apple_cn.txt", "./rule_set/sukkaw_ruleset/apple_cn_non_ip.txt"),
+        microsoft_cdn_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/microsoft_cdn.txt", "./rule_set/sukkaw_ruleset/microsoft_cdn_non_ip.txt"),
+        microsoft_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/microsoft.txt", "./rule_set/sukkaw_ruleset/microsoft_non_ip.txt"),
+        download_domainset: rp("domain", "https://ruleset.skk.moe/Clash/domainset/download.txt", "./rule_set/sukkaw_ruleset/download_domainset.txt"),
+        download_non_ip: rp("domain", "https://ruleset.skk.moe/Clash/non_ip/download.txt", "./rule_set/sukkaw_ruleset/download_non_ip.txt"),
+        lan_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/lan.txt", "./rule_set/sukkaw_ruleset/lan_non_ip.txt"),
+        lan_ip: rp("classical", "https://ruleset.skk.moe/Clash/ip/lan.txt", "./rule_set/sukkaw_ruleset/lan_ip.txt"),
+        domestic_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/domestic.txt", "./rule_set/sukkaw_ruleset/domestic_non_ip.txt"),
+        direct_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/direct.txt", "./rule_set/sukkaw_ruleset/direct_non_ip.txt"),
+        global_non_ip: rp("classical", "https://ruleset.skk.moe/Clash/non_ip/global.txt", "./rule_set/sukkaw_ruleset/global_non_ip.txt"),
+        domestic_ip: rp("classical", "https://ruleset.skk.moe/Clash/ip/domestic.txt", "./rule_set/sukkaw_ruleset/domestic_ip.txt"),
+        china_ip: rp("ipcidr", "https://ruleset.skk.moe/Clash/ip/china_ip.txt", "./rule_set/sukkaw_ruleset/china_ip.txt"),
+    };
+}
+
+function getProxiesByRegex(params, regex) {
+    return params.proxies
+        .filter((proxy) => proxy && proxy.name && regex.test(proxy.name))
+        .map((proxy) => proxy.name);
+}
